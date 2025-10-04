@@ -33,6 +33,230 @@ async function run() {
     const usersCollection = client.db("allmart").collection("users");
     const productsCollection = client.db("allmart").collection("products");
 
+
+    const ordersCollection = client.db("allmart").collection("orders");
+
+    // Order Endpoints
+
+    // Create new order
+    app.post("/orders", async (req, res) => {
+      try {
+        const order = req.body;
+
+        // Validation
+        if (!order.customerInfo || !order.items || !order.items.length) {
+          return res.status(400).send({
+            error: "Missing required fields: customerInfo and items are required"
+          });
+        }
+
+        if (!order.grandTotal || order.grandTotal <= 0) {
+          return res.status(400).send({
+            error: "Invalid grand total"
+          });
+        }
+
+        const result = await ordersCollection.insertOne({
+          ...order,
+          status: "pending", // Default status
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+
+        res.status(201).send({
+          message: "Order created successfully",
+          orderId: result.insertedId,
+          orderNumber: order.orderNumber
+        });
+      } catch (error) {
+        console.error("Error creating order:", error);
+        res.status(500).send({ error: "Failed to create order" });
+      }
+    });
+
+    // Get all orders
+    app.get("/orders", async (req, res) => {
+      try {
+        const { status, customerPhone } = req.query;
+        let query = {};
+
+        // Filter by status if provided
+        if (status) {
+          query.status = status;
+        }
+
+        // Filter by customer phone if provided
+        if (customerPhone) {
+          query["customerInfo.phone"] = customerPhone;
+        }
+
+        const orders = await ordersCollection.find(query).sort({ createdAt: -1 }).toArray();
+        res.send(orders);
+      } catch (error) {
+        console.error("Error fetching orders:", error);
+        res.status(500).send({ error: "Failed to fetch orders" });
+      }
+    });
+
+    // Get order by ID
+    app.get("/orders/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid order ID" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const order = await ordersCollection.findOne(query);
+
+        if (!order) {
+          return res.status(404).send({ error: "Order not found" });
+        }
+
+        res.send(order);
+      } catch (error) {
+        console.error("Error fetching order:", error);
+        res.status(500).send({ error: "Failed to fetch order" });
+      }
+    });
+
+    // Get orders by customer phone
+    app.get("/orders/customer/:phone", async (req, res) => {
+      try {
+        const { phone } = req.params;
+
+        const orders = await ordersCollection.find({
+          "customerInfo.phone": phone
+        }).sort({ createdAt: -1 }).toArray();
+
+        res.send(orders);
+      } catch (error) {
+        console.error("Error fetching customer orders:", error);
+        res.status(500).send({ error: "Failed to fetch customer orders" });
+      }
+    });
+
+    // Update order status - Single endpoint for all status updates
+    app.patch("/orders/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status, trackingNumber, returnReason } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid order ID" });
+        }
+
+        const validStatuses = ["pending", "confirmed", "shipped", "delivered", "cancelled", "returned"];
+        if (!status || !validStatuses.includes(status)) {
+          return res.status(400).send({
+            error: "Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled, returned"
+          });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateData = {
+          status: status,
+          updatedAt: new Date()
+        };
+
+         if (status === "shipped") {
+          updateData.shippedAt = new Date();
+          if (trackingNumber) {
+            updateData.trackingNumber = trackingNumber;
+          }
+        }
+
+        if (status === "delivered") {
+          updateData.deliveredAt = new Date();
+        }
+
+        if (status === "returned" && returnReason) {
+          updateData.returnReason = returnReason;
+          updateData.returnedAt = new Date();
+        }
+
+        if (status === "cancelled") {
+          updateData.cancelledAt = new Date();
+        }
+
+        const updateDoc = {
+          $set: updateData
+        };
+
+        const result = await ordersCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ error: "Order not found" });
+        }
+
+        res.send({
+          message: `Order status updated to ${status} successfully`,
+          result
+        });
+      } catch (error) {
+        console.error("Error updating order status:", error);
+        res.status(500).send({ error: "Failed to update order status" });
+      }
+    });
+
+    // Delete order
+    app.delete("/orders/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid order ID" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const result = await ordersCollection.deleteOne(query);
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ error: "Order not found" });
+        }
+
+        res.send({ message: "Order deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting order:", error);
+        res.status(500).send({ error: "Failed to delete order" });
+      }
+    });
+
+    // Get order statistics
+    app.get("/orders-stats", async (req, res) => {
+      try {
+        const totalOrders = await ordersCollection.countDocuments();
+        const pendingOrders = await ordersCollection.countDocuments({ status: "pending" });
+        const confirmedOrders = await ordersCollection.countDocuments({ status: "confirmed" });
+        const shippedOrders = await ordersCollection.countDocuments({ status: "shipped" });
+        const deliveredOrders = await ordersCollection.countDocuments({ status: "delivered" });
+        const cancelledOrders = await ordersCollection.countDocuments({ status: "cancelled" });
+        const returnedOrders = await ordersCollection.countDocuments({ status: "returned" });
+
+        const totalRevenue = await ordersCollection.aggregate([
+          { $match: { status: "delivered" } },
+          { $group: { _id: null, total: { $sum: "$grandTotal" } } }
+        ]).toArray();
+
+        res.send({
+          totalOrders,
+          pendingOrders,
+          confirmedOrders,
+          shippedOrders,
+          deliveredOrders,
+          cancelledOrders,
+          returnedOrders,
+          totalRevenue: totalRevenue[0]?.total || 0
+        });
+      } catch (error) {
+        console.error("Error fetching order statistics:", error);
+        res.status(500).send({ error: "Failed to fetch order statistics" });
+      }
+    });
+
+
+
     app.get("/users", async (req, res) => {
       const users = await usersCollection.find().toArray();
       res.send(users);
