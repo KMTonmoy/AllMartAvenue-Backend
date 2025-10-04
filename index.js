@@ -2,14 +2,12 @@ const express = require("express");
 const app = express();
 const cors = require("cors");
 require("dotenv").config();
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const nodemailer = require("nodemailer");
 
 const port = process.env.PORT || 8000;
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://waygobustravels.vercel.app"],
+    origin: ["http://localhost:3000", "https://allmartavenue.vercel.app"],
     credentials: true,
   })
 );
@@ -29,11 +27,11 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     console.log("Connected to MongoDB");
-    
+
 
     const bannerCollection = client.db("allmart").collection("BannerCollection");
     const usersCollection = client.db("allmart").collection("users");
-    const couponsCollection = client.db("allmart").collection("coupons");
+    const productsCollection = client.db("allmart").collection("products");
 
     app.get("/users", async (req, res) => {
       const users = await usersCollection.find().toArray();
@@ -200,53 +198,157 @@ async function run() {
       }
     });
 
-    app.get("/coupons", async (req, res) => {
-      const coupons = await couponsCollection.find().toArray();
-      res.send(coupons);
-    });
 
-    app.patch("/coupons/:id", async (req, res) => {
-      const { id } = req.params;
-      const coupon = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          code: coupon.code,
-          discount: coupon.discount,
-          description: coupon.description,
-        },
-      };
+    app.get("/products/search", async (req, res) => {
       try {
-        const result = await couponsCollection.updateOne(filter, updateDoc);
-        if (result.matchedCount === 0) {
-          return res.status(404).send({ message: "Coupon not found" });
+        const { q } = req.query;
+
+        if (!q) {
+          return res.status(400).send({ error: "Search query is required" });
         }
-        res.send({ acknowledged: true });
+
+        const searchQuery = {
+          $or: [
+            { name: { $regex: q, $options: "i" } },
+            { description: { $regex: q, $options: "i" } },
+            { details: { $regex: q, $options: "i" } },
+            { category: { $regex: q, $options: "i" } },
+            { productTag: { $regex: q, $options: "i" } },
+            { "colors.name": { $regex: q, $options: "i" } },
+            { features: { $regex: q, $options: "i" } }
+          ]
+        };
+
+        const products = await productsCollection.find(searchQuery).toArray();
+        res.send(products);
       } catch (error) {
-        console.error("Error updating coupon:", error);
-        res.status(500).send({ message: "Failed to update coupon" });
+        console.error("Error searching products:", error);
+        res.status(500).send({ error: "Failed to search products" });
       }
     });
 
-    app.post("/coupons", async (req, res) => {
-      const coupon = req.body;
-      const result = await couponsCollection.insertOne(coupon);
-      res.send(result);
+    // Get all products
+    app.get("/products", async (req, res) => {
+      try {
+        const products = await productsCollection.find().toArray();
+        res.send(products);
+      } catch (error) {
+        console.error("Error fetching products:", error);
+        res.status(500).send({ error: "Failed to fetch products" });
+      }
     });
 
-    app.delete("/coupons/:id", async (req, res) => {
-      const { id } = req.params;
-      const query = { _id: new ObjectId(id) };
-      const result = await couponsCollection.deleteOne(query);
-      res.send(result);
+    // Get product by ID
+    app.get("/products/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid product ID" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const product = await productsCollection.findOne(query);
+
+        if (!product) {
+          return res.status(404).send({ error: "Product not found" });
+        }
+
+        res.send(product);
+      } catch (error) {
+        console.error("Error fetching product:", error);
+        res.status(500).send({ error: "Failed to fetch product" });
+      }
     });
 
-    app.get("/coupons/:id", async (req, res) => {
-      const { id } = req.params;
-      const query = { _id: new ObjectId(id) };
-      const coupon = await couponsCollection.findOne(query);
-      res.send(coupon);
+    // Create new product
+    app.post("/products", async (req, res) => {
+      try {
+        const product = req.body;
+
+        if (!product.name || !product.price || !product.category) {
+          return res.status(400).send({ error: "Missing required fields: name, price, category" });
+        }
+
+        const result = await productsCollection.insertOne({
+          ...product,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+
+        res.status(201).send({
+          message: "Product created successfully",
+          productId: result.insertedId
+        });
+      } catch (error) {
+        console.error("Error creating product:", error);
+        res.status(500).send({ error: "Failed to create product" });
+      }
     });
+
+    // Update product by ID
+    app.put("/products/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const product = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid product ID" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            ...product,
+            updatedAt: new Date()
+          }
+        };
+
+        const result = await productsCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ error: "Product not found" });
+        }
+
+        res.send({ message: "Product updated successfully", result });
+      } catch (error) {
+        console.error("Error updating product:", error);
+        res.status(500).send({ error: "Failed to update product" });
+      }
+    });
+
+    // Delete product by ID
+    app.delete("/products/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: "Invalid product ID" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const result = await productsCollection.deleteOne(query);
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ error: "Product not found" });
+        }
+
+        res.send({ message: "Product deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting product:", error);
+        res.status(500).send({ error: "Failed to delete product" });
+      }
+    });
+
+
+
+
+
+
+
+
+
+
 
     app.get("/logout", async (req, res) => {
       try {
@@ -273,5 +375,5 @@ async function run() {
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("WayGo is sitting");
+  res.send("AllMart Server is Runing 🏃‍➡️🏃‍➡️🏃‍➡️");
 });
