@@ -327,100 +327,6 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/banners", async (req, res) => {
-      try {
-        const banners = await bannerCollection.find().toArray();
-        res.send(banners);
-      } catch (error) {
-        console.error("Error fetching banners:", error);
-        res.status(500).send({ error: "Failed to fetch banners" });
-      }
-    });
-
-    app.post("/banners", async (req, res) => {
-      const banner = req.body;
-
-      if (!banner || !banner.url || !banner.heading || !banner.description) {
-        return res.status(400).send({ error: "Invalid banner data" });
-      }
-
-      try {
-        const result = await bannerCollection.insertOne({
-          url: banner.url,
-          heading: banner.heading,
-          description: banner.description,
-          timestamp: Date.now(),
-        });
-        res
-          .status(201)
-          .send({ message: "Banner uploaded successfully", result });
-      } catch (error) {
-        console.error("Error uploading banner:", error);
-        res.status(500).send({ error: "Failed to upload banner" });
-      }
-    });
-
-    app.patch("/banners/:id", async (req, res) => {
-      const id = req.params.id;
-      const { url, heading, description } = req.body;
-
-      if (!url && !heading && !description) {
-        return res.status(400).send({ error: "No fields provided for update" });
-      }
-
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          ...(url && { url }),
-          ...(heading && { heading }),
-          ...(description && { description }),
-        },
-      };
-
-      try {
-        const result = await bannerCollection.updateOne(filter, updateDoc);
-
-        if (result.matchedCount === 0) {
-          return res.status(404).send({ error: "Banner not found" });
-        }
-
-        res.send({ message: "Banner updated successfully", result });
-      } catch (error) {
-        console.error("Error updating banner:", error);
-        res.status(500).send({ error: "Failed to update banner" });
-      }
-    });
-
-    app.put("/banners/:id", async (req, res) => {
-      const id = req.params.id;
-      const { url, heading, description } = req.body;
-
-      if (!url && !heading && !description) {
-        return res.status(400).send({ error: "No fields provided for update" });
-      }
-
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          ...(url && { url }),
-          ...(heading && { heading }),
-          ...(description && { description }),
-        },
-      };
-
-      try {
-        const result = await bannerCollection.updateOne(filter, updateDoc);
-
-        if (result.matchedCount === 0) {
-          return res.status(404).send({ error: "Banner not found" });
-        }
-
-        res.send({ message: "Banner updated successfully", result });
-      } catch (error) {
-        console.error("Error updating banner:", error);
-        res.status(500).send({ error: "Failed to update banner" });
-      }
-    });
 
 
     app.get("/products/search", async (req, res) => {
@@ -569,7 +475,90 @@ async function run() {
 
 
 
+    app.get("/banners", async (req, res) => {
+      try {
+        const banners = await bannerCollection.find().toArray();
+        res.send(banners);
+      } catch (error) {
+        console.error("Error fetching banners:", error);
+        res.status(500).send({ error: "Failed to fetch banners" });
+      }
+    });
 
+    app.post("/banners", async (req, res) => {
+      const { title, subtitle, description, buttonText, image } = req.body;
+
+      if (!title || !description || !image) {
+        return res.status(400).send({ error: "Missing required fields" });
+      }
+
+      try {
+        const newBanner = {
+          title,
+          subtitle: subtitle || "",
+          description,
+          buttonText: buttonText || "",
+          image,
+          createdAt: new Date(),
+        };
+
+        const result = await bannerCollection.insertOne(newBanner);
+        res.status(201).send({ message: "Banner added successfully", banner: newBanner, result });
+      } catch (error) {
+        console.error("Error uploading banner:", error);
+        res.status(500).send({ error: "Failed to upload banner" });
+      }
+    });
+
+    app.put("/banners/:id", async (req, res) => {
+      const id = req.params.id;
+      const { title, subtitle, description, buttonText, image } = req.body;
+
+      if (!title && !subtitle && !description && !buttonText && !image) {
+        return res.status(400).send({ error: "No fields provided for update" });
+      }
+
+      try {
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            ...(title && { title }),
+            ...(subtitle && { subtitle }),
+            ...(description && { description }),
+            ...(buttonText && { buttonText }),
+            ...(image && { image }),
+            updatedAt: new Date(),
+          },
+        };
+
+        const result = await bannerCollection.updateOne(filter, updateDoc);
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ error: "Banner not found" });
+        }
+
+        res.send({ message: "Banner updated successfully", result });
+      } catch (error) {
+        console.error("Error updating banner:", error);
+        res.status(500).send({ error: "Failed to update banner" });
+      }
+    });
+
+    app.delete("/banners/:id", async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const result = await bannerCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ error: "Banner not found" });
+        }
+
+        res.send({ message: "Banner deleted successfully", result });
+      } catch (error) {
+        console.error("Error deleting banner:", error);
+        res.status(500).send({ error: "Failed to delete banner" });
+      }
+    });
 
 
 
